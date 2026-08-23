@@ -3,7 +3,7 @@ import CryptoKit
 
 enum SHA {
     static func sha256(_ d: Data) -> Data { Data(SHA256.hash(data: d)) }
-    static func sha1(_ d: Data) -> Data { Data(CryptoKit.SHA1.hash(data: d)) }
+    static func sha1(_ d: Data) -> Data { Data(Insecure.SHA1.hash(data: d)) }
     static func hex(_ d: Data) -> String { d.map { String(format: "%02x", $0) }.joined() }
     static func sha1Hex(_ d: Data) -> String { hex(sha1(d)) }
 }
@@ -61,9 +61,7 @@ struct LogLine: Identifiable, Codable {
     }
 }
 
-/// Безопасный логгер процесса подписи.
-/// ВАЖНО: секреты (пароли p12, ключи) в лог принципиально не попадают —
-/// они никогда не передаются в этот класс.
+/// Лог процесса подписи. Секреты (пароли p12, ключи) сюда принципиально не попадают.
 actor SignLog {
     private(set) var lines: [LogLine] = []
     func add(_ level: LogLevel, _ msg: String) {
