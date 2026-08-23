@@ -22,9 +22,10 @@ final class ZipReader {
         try parseCentralDirectory()
     }
 
-    func u16(_ o: Int) -> UInt16 { map[o] | (UInt16(map[o+1]) << 8) }
+    func u16(_ o: Int) -> UInt16 { UInt16(map[o]) | (UInt16(map[o + 1]) << 8) }
     func u32(_ o: Int) -> UInt32 {
-        UInt32(map[o]) | (UInt32(map[o+1]) << 8) | (UInt32(map[o+2]) << 16) | (UInt32(map[o+3]) << 24)
+        UInt32(map[o]) | (UInt32(map[o + 1]) << 8)
+            | (UInt32(map[o + 2]) << 16) | (UInt32(map[o + 3]) << 24)
     }
     func rawBytes(in range: Range<Int>) -> Data { map.subdata(in: range) }
 
@@ -52,7 +53,7 @@ final class ZipReader {
             let creatorSys = u16(ptr + 4) >> 8
             let mode: UInt16 = creatorSys == 3 ? UInt16((extAttrs >> 16) & 0xFFFF) : 0
             let localOffset = Int(u32(ptr + 42))
-            let nameData = rawBytes(in: (ptr+46)..<(ptr+46+nameLen))
+            let nameData = rawBytes(in: (ptr + 46)..<(ptr + 46 + nameLen))
             guard let name = String(data: nameData, encoding: .utf8) else { break }
             guard compSize != 0xFFFFFFFF else { throw AppError.invalidFormat("ZIP64 не поддерживается") }
             entries.append(Entry(name: name, method: method, crc32: crc, compSize: compSize,
@@ -106,7 +107,9 @@ final class ZipReader {
             try fm.createDirectory(at: dst.deletingLastPathComponent(), withIntermediateDirectories: true)
             let data = try read(e)
             try data.write(to: dst)
-            if e.unixMode & 0o111 != 0 { try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dst.path) }
+            if e.unixMode & 0o111 != 0 {
+                try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dst.path)
+            }
         }
     }
 }
@@ -115,13 +118,14 @@ enum Deflate {
     static func encode(_ data: Data) -> Data? {
         guard !data.isEmpty else { return Data() }
         var dst = Data(count: data.count + 64)
-        let written = dst.withUnsafeMutableBytes { dbuf -> Int in
-            data.withUnsafeBytes { sbuf in
-                compression_encode_buffer(dbuf.bindMemory(to: UInt8.self).capacity,
-                                          dbuf.bindMemory(to: UInt8.self).capacity,
-                                          sbuf.bindMemory(to: UInt8.self).baseAddress!,
+        let written: Int = dst.withUnsafeMutableBytes { (dbuf: UnsafeMutableRawBufferPointer) -> Int in
+            data.withUnsafeBytes { (sbuf: UnsafeRawBufferPointer) -> Int in
+                compression_encode_buffer(dbuf.baseAddress!.assumingMemoryBound(to: UInt8.self),
+                                          dbuf.count,
+                                          sbuf.baseAddress!.assumingMemoryBound(to: UInt8.self),
                                           data.count,
-                                          nil, COMPRESSION_ZLIB)
+                                          nil,
+                                          COMPRESSION_ZLIB)
             }
         }
         guard written > 0 else { return nil }
@@ -129,16 +133,18 @@ enum Deflate {
     }
 
     static func decode(_ data: Data, expected: Int) -> Data? {
+        guard !data.isEmpty else { return nil }
         var cap = max(expected, 4096)
         while cap <= (1 << 30) {
             var dst = Data(count: cap)
-            let written = dst.withUnsafeMutableBytes { dbuf -> Int in
-                data.withUnsafeBytes { sbuf in
-                    compression_decode_buffer(dbuf.bindMemory(to: UInt8.self).capacity,
-                                              dbuf.bindMemory(to: UInt8.self).capacity,
-                                              sbuf.bindMemory(to: UInt8.self).baseAddress!,
+            let written: Int = dst.withUnsafeMutableBytes { (dbuf: UnsafeMutableRawBufferPointer) -> Int in
+                data.withUnsafeBytes { (sbuf: UnsafeRawBufferPointer) -> Int in
+                    compression_decode_buffer(dbuf.baseAddress!.assumingMemoryBound(to: UInt8.self),
+                                              dbuf.count,
+                                              sbuf.baseAddress!.assumingMemoryBound(to: UInt8.self),
                                               data.count,
-                                              nil, COMPRESSION_ZLIB)
+                                              nil,
+                                              COMPRESSION_ZLIB)
                 }
             }
             if written > 0 { return dst.prefix(written) }
@@ -168,10 +174,15 @@ final class ZipWriter {
 
     private static func dosTime(_ date: Date = .init()) -> (time: UInt16, date: UInt16) {
         let c = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
-        let y = max(1980, c.year ?? 1980) - 1980
-        let time = UInt16(((c.hour ?? 0) << 11) | ((c.minute ?? 0) << 5) | ((c.second ?? 0) / 2))
-        let dat = UInt16((y << 9) | ((c.month ?? 1) << 5) | (c.day ?? 1))
-        return (time, dat)
+        let year = max(1980, c.year ?? 1980) - 1980
+        let month = c.month ?? 1
+        let day = c.day ?? 1
+        let hour = c.hour ?? 0
+        let minute = c.minute ?? 0
+        let second = c.second ?? 0
+        let timeValue = (hour << 11) + (minute << 5) + (second / 2)
+        let dateValue = (year << 9) + (month << 5) + day
+        return (UInt16(timeValue), UInt16(dateValue))
     }
 
     private func put16(_ v: UInt16, into arr: inout [UInt8]) {
