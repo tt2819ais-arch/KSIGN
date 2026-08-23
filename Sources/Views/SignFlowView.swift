@@ -2,18 +2,14 @@ import SwiftUI
 import PhotosUI
 
 struct SignFlowView: View {
-    @EnvironmentObject var library: LibraryViewModel
     @Environment(\.dismiss) private var dismiss
     @StateObject private var vm: SignViewModel
     @State private var photoItem: PhotosPickerItem?
+    let library: LibraryViewModel
 
-    init(ipa: ImportedIPA) {
-        // library внедряется в onAppear через environment — создаём VM лениво нельзя,
-        // поэтому используем общий singleton-паттерн через EnvironmentObject в body.
-        guard let lib = Shared.library else {
-            fatalError("LibraryViewModel не инициализирован")
-        }
-        _vm = StateObject(wrappedValue: SignViewModel(library: lib, ipa: ipa))
+    init(ipa: ImportedIPA, library: LibraryViewModel) {
+        self.library = library
+        _vm = StateObject(wrappedValue: SignViewModel(library: library, ipa: ipa))
     }
 
     var body: some View {
@@ -21,13 +17,18 @@ struct SignFlowView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     switch vm.phase {
-                    case .idle, .checking, .ready: configuration
-                    case .signing: signingScreen
-                    case .done(let url): result(url)
-                    case .failed(let msg): failure(msg)
+                    case .idle, .checking, .ready:
+                        configuration
+                    case .signing:
+                        signingScreen
+                    case .done(let url):
+                        result(url)
+                    case .failed(let msg):
+                        failure(msg)
                     case .cancelled:
                         VStack(spacing: 12) {
-                            Image(systemName: "xmark.circle").font(.system(size: 60)).foregroundStyle(.orange)
+                            Image(systemName: "xmark.circle")
+                                .font(.system(size: 60)).foregroundStyle(.orange)
                             Text("Отменено").font(.headline)
                         }.frame(maxWidth: .infinity).padding(.vertical, 40)
                     }
@@ -38,29 +39,21 @@ struct SignFlowView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(vm.phase == .signing ? "Отменить" : "Закрыть") {
-                        if vm.phase == .signing { /* отмена через отмену Task — упрощённо */ }
-                        dismiss()
-                    }
+                    Button("Закрыть") { dismiss() }
                 }
             }
             .task { await vm.runPreflight() }
-            .photosPicker(isPresented: .constant(photoItem == nil && showPhotoPickerFlag),
-                          selection: $photoItem, matching: .images)
             .onChange(of: photoItem) { _, item in
                 guard let item else { return }
                 Task {
-                    if let img = try? await item.loadTransferable(type: UIImage.self) {
+                    if let data = try? await item.loadTransferable(type: Data.self),
+                       let img = UIImage(data: data) {
                         vm.iconImage = img
                     }
                 }
             }
         }
-        .onAppear { Shared.library = library }
     }
-
-    // вспомогательный флаг для photosPicker
-    @State private var showPhotoPickerFlag = false
 
     // MARK: Экран конфигурации
 
@@ -73,7 +66,9 @@ struct SignFlowView: View {
             } label: {
                 selectorRow(icon: "seal.fill",
                             title: vm.selectedCert?.label ?? "Выбрать сертификат",
-                            subtitle: vm.selectedCert.map { "\($0.certType) · до \($0.notAfter.formatted(date: .abbreviated, time: .omitted))" } ?? ".p12")
+                            subtitle: vm.selectedCert.map {
+                                "\($0.certType) · до \($0.notAfter.formatted(date: .abbreviated, time: .omitted))"
+                            } ?? ".p12")
             }
 
             Menu {
@@ -206,9 +201,4 @@ struct SignFlowView: View {
                 .buttonStyle(.bordered)
         }
     }
-}
-
-/// Простейший DI-контейнер для передачи LibraryViewModel в sheets.
-enum Shared {
-    nonisolated(unsafe) static weak var library: LibraryViewModel?
 }
