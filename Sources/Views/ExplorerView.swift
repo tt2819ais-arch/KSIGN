@@ -26,7 +26,7 @@ struct ExplorerView: View {
                 }
             }
             .searchable(text: $vm.searchText, prompt: "Поиск файлов")
-            .onChange(of: vm.searchText) { vm.reload() }
+            .onChange(of: vm.searchText) { _, _ in vm.reload() }
             .navigationTitle("IPA Explorer")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Готово") { dismiss() } } }
@@ -37,6 +37,7 @@ struct ExplorerView: View {
         let url: URL
         @ObservedObject var vm: ExplorerViewModel
         @State private var openFile: URL?
+
         var body: some View {
             let isDir = ((try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory) ?? false
             Button {
@@ -54,8 +55,11 @@ struct ExplorerView: View {
                 }
             }
             .buttonStyle(.plain)
-            .sheet(item: $openFile) { FileViewer(url: url) }
+            .sheet(item: $openFile) { item in
+                FileViewer(url: item)
+            }
         }
+
         private var iconName: String {
             switch url.pathExtension.lowercased() {
             case "plist": return "list.bullet.rectangle"
@@ -67,7 +71,9 @@ struct ExplorerView: View {
     }
 }
 
-extension URL: Identifiable { public var id: String { absoluteString } }
+extension URL: @retroactive Identifiable {
+    public var id: String { absoluteString }
+}
 
 struct FileViewer: View {
     let url: URL
@@ -91,7 +97,9 @@ struct FileViewer: View {
         case "png":
             if let img = UIImage(contentsOfFile: url.path) {
                 Image(uiImage: img).resizable().scaledToFit().padding()
-            } else { BinaryInfo(url: url) }
+            } else {
+                BinaryInfo(url: url)
+            }
         default:
             BinaryInfo(url: url)
         }
@@ -129,10 +137,11 @@ struct PlistNode: View {
                 }
             }
         } else {
-            KeyValueRow(key: key, value: describe(value), mono: true)
+            KeyValueRow(key: key, value: Self.describe(value), mono: true)
         }
     }
-    private func describe(_ v: Any) -> String {
+
+    private static func describe(_ v: Any) -> String {
         switch v {
         case let d as Data: return "Data (\(d.count) B): \(SHA.hex(d.prefix(16)))…"
         case let s as String: return "\"\(s)\""
@@ -156,6 +165,7 @@ struct TextViewer: View {
             }
         }
     }
+
     private func isText(_ d: Data) -> Bool {
         let sample = d.prefix(4096)
         return !sample.contains(0) && (String(data: sample, encoding: .utf8) != nil)
