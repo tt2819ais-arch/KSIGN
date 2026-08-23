@@ -6,13 +6,13 @@ enum KeychainService {
     static func allIdentities() -> [SecIdentity] {
         let query: [String: Any] = [
             kSecClass as String: kSecClassIdentity,
-            kSecReturnRefs as String: true,
+            kSecReturnRef as String: true,
             kSecMatchLimit as String: kSecMatchLimitAll
         ]
         var out: AnyObject?
-        let st = SecItemCopyMatching(query as CFDictionary, &out)
-        guard st == errSecSuccess, let refs = out as? [SecIdentity] else { return [] }
-        return refs
+        let status = SecItemCopyMatching(query as CFDictionary, &out)
+        guard status == errSecSuccess, let refs = out as? [Any] else { return [] }
+        return refs.compactMap { $0 as? SecIdentity }
     }
 
     static func certificateData(of identity: SecIdentity) -> (SecCertificate, Data)? {
