@@ -32,7 +32,6 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .switchTab)) { n in
             if let t = n.object as? Int { tab = t }
         }
-        .onAppear { Shared.library = library }
         .tint(theme.palette.accent)
     }
 }
