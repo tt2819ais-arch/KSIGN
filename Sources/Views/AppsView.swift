@@ -32,7 +32,7 @@ struct AppsView: View {
             }
             .sheet(item: $detail) { ipa in AppDetailView(ipa: ipa) }
             .fileImporter(isPresented: $showPicker, allowedContentTypes: [.ipaType]) { result in
-                if case .success(let urls) = result, let url = urls.first {
+                if case .success(let url) = result {
                     Task { await library.importIPA(from: url) }
                 }
             }
@@ -59,7 +59,7 @@ struct AppCardIconOnly: View {
         if let data = ipa.iconData, let img = UIImage(data: data) {
             Image(uiImage: img).resizable().scaledToFill()
                 .frame(width: 44, height: 44)
-                .clipShape(RoundedRectangle(cornerRadius: 10, continuous: true))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
         } else {
             ZStack {
                 RoundedRectangle(cornerRadius: 10).fill(.indigo.gradient)
@@ -89,7 +89,6 @@ struct AppDetailView: View {
                         }
                         Spacer()
                     }
-                    .transition(.move(edge: .top).combined(with: .opacity))
 
                     VStack(spacing: 10) {
                         KeyValueRow(key: "Bundle ID", value: ipa.bundleID, mono: true)
@@ -133,7 +132,7 @@ struct AppDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Закрыть") { dismiss() } } }
             .sheet(isPresented: $showExplorer) { ExplorerView(appDir: URL(fileURLWithPath: ipa.extractDirURL)) }
-            .sheet(isPresented: $showSign) { SignFlowView(ipa: ipa) }
+            .sheet(isPresented: $showSign) { SignFlowView(ipa: ipa, library: library) }
         }
     }
 }
