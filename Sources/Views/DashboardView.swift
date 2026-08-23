@@ -10,7 +10,7 @@ extension UTType {
 struct DashboardView: View {
     @EnvironmentObject var theme: ThemeManager
     @EnvironmentObject var library: LibraryViewModel
-    @Binding var showSettings: SheetBool
+    @Binding var showSettings: Bool
     @State private var showIPAPicker = false
 
     var body: some View {
@@ -30,7 +30,7 @@ struct DashboardView: View {
             }
         }
         .fileImporter(isPresented: $showIPAPicker, allowedContentTypes: [.ipaType]) { result in
-            if case .success(let urls) = result, let url = urls.first {
+            if case .success(let url) = result {
                 Task { await library.importIPA(from: url) }
             }
         }
@@ -65,15 +65,12 @@ struct DashboardView: View {
     private var quickActions: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
             quick("shippingbox.fill", "Import IPA") { showIPAPicker = true }
-            quick("seal.fill", "Certificates") { tabSwitch(2) }
-            quick("doc.badge.gearshape", "Profiles") { tabSwitch(3) }
-            quick("signature", "Signed Apps") { tabSwitch(4) }
+            quick("seal.fill", "Certificates") { NotificationCenter.default.post(name: .switchTab, object: 2) }
+            quick("doc.badge.gearshape", "Profiles") { NotificationCenter.default.post(name: .switchTab, object: 3) }
+            quick("signature", "Signed Apps") { NotificationCenter.default.post(name: .switchTab, object: 4) }
             quick("gearshape.fill", "Settings") { showSettings = true }
         }
     }
-
-    @State private var pendingTab: Int?
-    private func tabSwitch(_ t: Int) { NotificationCenter.default.post(name: .switchTab, object: t) }
 
     private func quick(_ icon: String, _ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
@@ -110,7 +107,6 @@ struct DashboardView: View {
 }
 
 extension Notification.Name { static let switchTab = Notification.Name("switchTab") }
-typealias SheetBool = Bool
 
 struct AppCard: View {
     let ipa: ImportedIPA
@@ -126,11 +122,12 @@ struct AppCard: View {
         .frame(width: 150, alignment: .leading)
         .card()
     }
+
     @ViewBuilder private var appIcon: some View {
         if let data = ipa.iconData, let img = UIImage(data: data) {
             Image(uiImage: img).resizable().scaledToFill()
                 .frame(width: 52, height: 52)
-                .clipShape(RoundedRectangle(cornerRadius: 12, continuous: true))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
         } else {
             ZStack {
                 RoundedRectangle(cornerRadius: 12).fill(.blue.gradient)
