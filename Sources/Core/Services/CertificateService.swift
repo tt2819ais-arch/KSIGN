@@ -18,8 +18,7 @@ final class CertificateService {
 
     // MARK: - Импорт .p12
 
-    /// Импортирует p12. Пароль используется ОДИН раз и нигде не сохраняется.
-    /// Identity попадает в Keychain средствами SecPKCS12Import.
+    /// Пароль используется ОДИН раз и нигде не сохраняется.
     func importP12(data: Data, password: String) throws -> (details: CertificateDetails, certSHA1: String, chainDER: [Data]) {
         let options = [kSecImportExportPassphrase as String: password]
         var rawItems: CFArray?
@@ -47,42 +46,34 @@ final class CertificateService {
         return (details, sha1, chain.map { SecCertificateCopyData($0) as Data })
     }
 
-    // MARK: - Разбор информации о сертификате (только публичные API)
+    // MARK: - Информация о сертификате через собственный X.509-парсер
 
     static func describe(chain: [SecCertificate], hasKey: Bool) -> CertificateDetails {
-        func stringVal(_ oid: CFString) -> String? {
-            guard let dict = SecCertificateCopyValues(oid, nil, nil) as? [CFString: Any],
-                  let entry = dict[oid] as? [CFString: Any] else { return nil }
-            return entry[kSecPropertyKeyValue as CFString] as? String
-        }
-        func dateVal(_ oid: CFString) -> Date? {
-            guard let dict = SecCertificateCopyValues(oid, nil, nil) as? [CFString: Any],
-                  let entry = dict[oid] as? [CFString: Any],
-                  let n = entry[kSecPropertyKeyValue as CFString] as? NSNumber else { return nil }
-            return Date(timeIntervalSinceReferenceDate: n.doubleValue)
-        }
-
         let leaf = chain[0]
-        let cn = stringVal(kSecOIDCommonName) ?? "Без имени"
-        let org = stringVal(kSecOIDOrganizationName) ?? ""
-        let ou = stringVal(kSecOIDOrganizationalUnitName) ?? ""
-        let issuerCN = stringVal(kSecOIDX509V1IssuerName) ?? ""
-        let notBefore = dateVal(kSecOIDX509V1ValidityNotBefore) ?? Date.distantPast
-        let notAfter = dateVal(kSecOIDX509V1ValidityNotAfter) ?? Date.distantFuture
-
-        var serialHex = ""
-        if let d = SecCertificateCopyValues(kSecOIDX509V1SerialNumber, nil, nil) as? [CFString: Any],
-           let entry = d[kSecOIDX509V1SerialNumber] as? [CFString: Any],
-           let data = entry[kSecPropertyKeyValue as CFString] as? Data {
-            serialHex = SHA.hex(data)
+        let der = SecCertificateCopyData(leaf) as Data
+        let info: X509Info
+        if let parsed = try? X509Parser.parse(der: der) {
+            info = parsed
+        } else {
+            info = X509Info(serialBytes: [], notBefore: .distantPast, notAfter: .distantFuture,
+                            issuerDER: [], subjectCN: "Без имени", subjectO: "", subjectOU: "",
+                            issuerCN: "")
         }
 
+        let cn = info.subjectCN.isEmpty ? "Без имени" : info.subjectCN
         var type = "Unknown"
         if cn.contains("Apple Development") || cn.contains("iPhone Developer") { type = "Development" }
         else if cn.contains("Apple Distribution") || cn.contains("iPhone Distribution") { type = "Distribution" }
         else if cn.contains("Apple Push") { type = "Push" }
 
-        let looksLikeTeamID = ou.count == 10 && !ou.isEmpty && ou.allSatisfy { $0.isUpperOrDigit }
+        let org = info.subjectO
+        let ou = info.subjectOU
+        let looksLikeTeamID = ou.count == 10 && ou.allSatisfy { $0.isUpperOrDigit }
+
+        var serialHex = ""
+        if !info.serialBytes.isEmpty {
+            serialHex = SHA.hex(Data(info.serialBytes))
+        }
 
         return CertificateDetails(
             label: cn,
@@ -90,9 +81,9 @@ final class CertificateService {
             teamID: looksLikeTeamID ? ou : "",
             teamName: org,
             subject: "CN=\(cn)" + (org.isEmpty ? "" : ", O=\(org)") + (ou.isEmpty ? "" : ", OU=\(ou)"),
-            issuer: issuerCN,
-            notBefore: notBefore,
-            notAfter: notAfter,
+            issuer: info.issuerCN,
+            notBefore: info.notBefore,
+            notAfter: info.notAfter,
             serialHex: serialHex,
             hasPrivateKey: hasKey)
     }
@@ -110,5 +101,5 @@ final class CertificateService {
 }
 
 private extension Character {
-    var isUpperOrDigit: Bool { (isUppercase || isNumber) }
+    var isUpperOrDigit: Bool { isUppercase || isNumber }
 }
