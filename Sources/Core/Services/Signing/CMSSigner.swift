@@ -8,14 +8,12 @@ struct SigningIdentity {
 }
 
 /// Строит CMS (PKCS#7) SignedData — блок Signature в SuperBlob кодовой подписи.
-/// Подпись выполняется приватным ключом из Keychain через публичный SecKeyCreateSignature.
 enum CMSSigner {
 
     static let oidData          = "1.2.840.113549.1.7.1"
     static let oidSignedData    = "1.2.840.113549.1.7.2"
     static let oidSHA256        = "2.16.840.1.101.3.4.2.1"
     static let oidRSA           = "1.2.840.113549.1.1.1"
-    static let oidEC            = "1.2.840.10045.2.1"
     static let oidECDSA256      = "1.2.840.10045.4.3.2"
     static let oidContentType   = "1.2.840.113549.1.9.3"
     static let oidSigningTime   = "1.2.840.113549.1.9.5"
@@ -28,22 +26,12 @@ enum CMSSigner {
         let keyAttrs = SecKeyCopyAttributes(key) as? [CFString: Any]
         let isRSA = (keyAttrs?[kSecAttrKeyType] as? String) == (kSecAttrKeyTypeRSA as String)
 
-        // IssuerAndSerialNumber
-        var err: Unmanaged<CFError>?
-        guard let issuerDER = SecCertificateCopyNormalizedIssuerSequence(leaf, &err) as Data? else {
-            throw AppError.invalidFormat("не удалось прочитать Issuer сертификата")
-        }
-        let serialBytes: [UInt8]
-        if let d = SecCertificateCopyValues(kSecOIDX509V1SerialNumber, nil, nil) as? [CFString: Any],
-           let entry = d[kSecOIDX509V1SerialNumber] as? [CFString: Any],
-           let data = entry[kSecPropertyKeyValue as CFString] as? Data {
-            serialBytes = Array(data)
-        } else {
-            throw AppError.invalidFormat("не удалось прочитать серийный номер сертификата")
-        }
+        // IssuerAndSerialNumber — берём из собственного X.509-парсера
+        let leafDER = SecCertificateCopyData(leaf) as Data
+        let certInfo = try X509Parser.parse(der: leafDER)
         let sid = DER.seq([
-            Array(issuerDER),
-            DER.integer(bytes: serialBytes)
+            certInfo.issuerDER,
+            DER.integer(bytes: certInfo.serialBytes)
         ])
 
         let digestAlg = DER.seq([DER.oid(oidSHA256), DER.null()])
@@ -60,9 +48,10 @@ enum CMSSigner {
         let attrsTLVs = [contentTypeAttr, signingTimeAttr, msgDigestAttr].sorted { DER.lexicographic($0, $1) }
         let signedAttrsTagged = DER.ctxImplicitPrimitive(0, attrsTLVs.flatMap { $0 })
 
-        // Подпись атрибутов
+        // Подпись атрибутов приватным ключом из Keychain
         let alg: SecKeyAlgorithm = isRSA ? .rsaSignatureMessagePKCS1v15SHA256
                                          : .ecdsaSignatureMessageX962SHA256
+        var err: Unmanaged<CFError>?
         guard let sig = SecKeyCreateSignature(key, alg, Data(signedAttrsTagged) as CFData, &err) as Data?,
               err == nil else {
             let msg = err?.takeRetainedValue().localizedDescription ?? "неизвестная ошибка ключа"
