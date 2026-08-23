@@ -30,7 +30,7 @@ struct ProfilesView: View {
                 }
             }
             .fileImporter(isPresented: $showPicker, allowedContentTypes: [.profileType]) { result in
-                if case .success(let urls) = result, let url = urls.first {
+                if case .success(let url) = result {
                     Task {
                         if case .failure(let e) = await library.importProfile(from: url) {
                             errorMessage = e.localizedDescription
