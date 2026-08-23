@@ -29,10 +29,14 @@ final class CertificateService {
             }
             throw AppError.invalidFormat("не удалось импортировать .p12 (код \(status))")
         }
+
         guard let items = rawItems as? [[String: Any]], let first = items.first,
-              let identity = first[kSecImportItemIdentity as String] as? SecIdentity else {
+              let identityObject = first[kSecImportItemIdentity as String] else {
             throw AppError.invalidFormat("в .p12 не найдена связка сертификат+ключ")
         }
+        // CF-тип нельзя кастить через as? — используем unsafeDowncast по контракту API
+        let identity = unsafeDowncast(identityObject as AnyObject, to: SecIdentity.self)
+
         let chain = (first[kSecImportItemCertChain as String] as? [SecCertificate]) ?? []
         guard let leaf = chain.first else {
             throw AppError.invalidFormat("в .p12 не найден сертификат")
