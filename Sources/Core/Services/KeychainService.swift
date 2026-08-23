@@ -11,8 +11,10 @@ enum KeychainService {
         ]
         var out: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &out)
-        guard status == errSecSuccess, let refs = out as? [Any] else { return [] }
-        return refs.compactMap { $0 as? SecIdentity }
+        guard status == errSecSuccess, let refs = out as? [AnyObject] else { return [] }
+        return refs.compactMap { element in
+            CFGetTypeID(element) == SecIdentity.GetTypeID() ? (element as! SecIdentity) : nil
+        }
     }
 
     static func certificateData(of identity: SecIdentity) -> (SecCertificate, Data)? {
@@ -22,7 +24,7 @@ enum KeychainService {
         return (c, data)
     }
 
-    /// Находит identity в Keychain по SHA-1 листового сертификата (сохранённому при импорте p12).
+    /// Находит identity в Keychain по SHA-1 листового сертификата.
     static func identity(certSHA1Hex: String) -> SecIdentity? {
         for id in allIdentities() {
             if let (_, data) = certificateData(of: id),
@@ -42,4 +44,8 @@ enum KeychainService {
         SecItemDelete([kSecClass as String: kSecClassIdentity,
                        kSecValueRef as String: id] as CFDictionary)
     }
+}
+
+private extension SecIdentity {
+    static func GetTypeID() -> CFTypeID { SecIdentityGetTypeID() }
 }
