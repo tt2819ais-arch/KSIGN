@@ -14,13 +14,13 @@ struct BundleSignTask {
     var executableRelative: String
     var entitlementsXML: Data
     var needsProfileEmbed: Bool
-    var infoRelative: String { relative(dir) + "/Info.plist" }
+    var rootPath: String = ""
 
+    var infoRelative: String { relative(dir) + "/Info.plist" }
     var relativeDir: String { relative(dir) }
     func relative(_ url: URL) -> String {
         url.path.replacingOccurrences(of: rootPath + "/", with: "")
     }
-    var rootPath: String = ""
 }
 
 struct SignPlan {
@@ -40,22 +40,20 @@ enum PlanBuilder {
         let fm = FileManager.default
         let rootPath = workRoot.path
         let infoURL = appDir.appendingPathComponent("Info.plist")
-        var info = try Plist.dict(at: infoURL)
+        let info = try Plist.dict(at: infoURL)
         let oldID = info["CFBundleIdentifier"] as? String ?? ""
         let newMainID = overrides.bundleID?.isEmpty == false ? overrides.bundleID! : oldID
 
         var warnings: [String] = []
 
-        // --- Рекурсивный сбор вложенных бандлов (Frameworks, PlugIns, их вложенности)
+        // Рекурсивный сбор вложенных бандлов (Frameworks, PlugIns, вложенные .appex)
         var bundleDirs: [URL] = [appDir]
         func walk(_ dir: URL) {
-            guard let children = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey]) else { return }
+            guard let children = try? fm.contentsOfDirectory(at: dir,
+                                                             includingPropertiesForKeys: [.isDirectoryKey]) else { return }
             for child in children {
                 let isDir = ((try? child.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory) ?? false
-                guard isDir else {
-                    if child.pathExtension == "dylib" { /* соберём отдельно */ }
-                    continue
-                }
+                guard isDir else { continue }
                 if fm.fileExists(atPath: child.appendingPathComponent("Info.plist").path) {
                     bundleDirs.append(child)
                 }
@@ -64,7 +62,7 @@ enum PlanBuilder {
         }
         walk(appDir)
 
-        // --- Новые bundle id для вложенных бандлов: <главный>.<суффикс>
+        // Новые bundle id для вложенных бандлов: <главный>.<суффикс>
         func newID(for dir: URL) -> String {
             if dir == appDir { return newMainID }
             let parent = dir.deletingLastPathComponent()
@@ -85,25 +83,23 @@ enum PlanBuilder {
             let infoPath = dir.appendingPathComponent("Info.plist")
             var dinfo = try Plist.dict(at: infoPath)
             let nid = newID(for: dir)
+            let oldBundleID = (dinfo["CFBundleIdentifier"] as? String) ?? oldID
 
-            // Прописываем новый bundle id во вложенные бандлы
             if !isMain {
                 dinfo["CFBundleIdentifier"] = nid
                 try Plist.data(dinfo).write(to: infoPath)
             }
 
-            let exec = dinfo["CFBundleExecutable"] as? String
+            let execName = (dinfo["CFBundleExecutable"] as? String)
                 ?? dir.lastPathComponent.replacingOccurrences(of: ".framework", with: "")
-                ?? dir.lastPathComponent
+            let exec = execName.isEmpty ? dir.lastPathComponent : execName
 
-            // Профиль внутрь вложенных бандлов, если отсутствует
             let profRel = dir.appendingPathComponent("embedded.mobileprovision").path
             let needsProfile = !fm.fileExists(atPath: profRel)
             if needsProfile {
                 try profile.rawData.write(to: dir.appendingPathComponent("embedded.mobileprovision"))
             }
 
-            // Entitlements: главный берёт профиль целиком, вложенным — производные
             var ents = profile.entitlements
             if !isMain {
                 ents = transform(entitlements: profile.entitlements,
@@ -114,16 +110,14 @@ enum PlanBuilder {
             }
             let entXML = try Plist.data(ents, binary: false)
 
-            var task = BundleSignTask(dir: dir, isMain: isMain,
-                                      oldBundleID: (dinfo["CFBundleIdentifier"] as? String) ?? oldID,
+            let task = BundleSignTask(dir: dir, isMain: isMain,
+                                      oldBundleID: oldBundleID,
                                       newBundleID: isMain ? newMainID : nid,
                                       executableRelative: exec,
                                       entitlementsXML: entXML,
-                                      needsProfileEmbed: needsProfile)
-            task.rootPath = rootPath
+                                      needsProfileEmbed: needsProfile,
+                                      rootPath: rootPath)
             tasks.append(task)
-
-            if !isMain, dir.pathExtension == "" || dir.lastPathComponent.hasSuffix(".framework") { /* ок */ }
         }
 
         // Свободные .dylib прямо в Frameworks/
@@ -133,7 +127,9 @@ enum PlanBuilder {
         }
 
         // Глубина: сначала подписываем самые вложенные
-        tasks.sort { $0.dir.path.components(separatedBy: "/").count > $1.dir.path.components(separatedBy: "/").count }
+        tasks.sort {
+            $0.dir.path.components(separatedBy: "/").count > $1.dir.path.components(separatedBy: "/").count
+        }
 
         if overrides.bundleID?.isEmpty == false,
            !ProfileService.matches(pattern: profile.bundlePattern, bundleID: newMainID) {
@@ -155,7 +151,7 @@ enum PlanBuilder {
     private static func transform(entitlements: [String: Any], oldMain: String,
                                   newMain: String, childID: String, teamID: String) -> [String: Any] {
         var e = entitlements
-        if teamID.isEmpty == false {
+        if !teamID.isEmpty {
             e["application-identifier"] = "\(teamID).\(childID)"
         }
         if let groups = e["keychain-access-groups"] as? [String] {
