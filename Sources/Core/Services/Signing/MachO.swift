@@ -83,7 +83,7 @@ struct LoadCommand { let cmd: UInt32; let cmdsize: UInt32; let offset: Int }
 
 /// Изменяемое представление одного тонкого (thin) Mach-O слайса.
 struct MachOBinary {
-    private(set) var data: Data
+    var data: Data
 
     init(_ data: Data) { self.data = data }
 
@@ -134,7 +134,6 @@ struct MachOBinary {
             writeLE(dataoff, off + 8)
             writeLE(datasize, off + 12)
         } else {
-            // Команды нет — добавляем новую в конец загрузочных команд.
             let insertAt = 32 + sizeofcmds
             guard data.count >= insertAt + 16 else {
                 throw AppError.invalidFormat("в Mach-O нет свободного места под LC_CODE_SIGNATURE")
