@@ -32,7 +32,7 @@ enum CodeResourcesBuilder {
                 filesSHA1[item.rel] = ["symlink": item.target ?? ""]
             } else {
                 let data = try Data(contentsOf: item.url)
-                filesSHA1[item.rel] = Data(SHA1.hash(data: data)).base64EncodedString()
+                filesSHA1[item.rel] = Data(Insecure.SHA1.hash(data: data)).base64EncodedString()
                 files2SHA256[item.rel] = ["hash": Data(SHA256.hash(data: data)).base64EncodedString()]
             }
         }
